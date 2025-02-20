@@ -3,29 +3,39 @@
 # carga de datos 
 # disponibles en el siguiente enlace: https://udcgal-my.sharepoint.com/:u:/g/personal/carlos_fernandez_udc_es/EV5v2btIVYdEu2iMzNE3liEBnaRI6jNsx9rgkilFd5Fonw?e=9aT0pB
 
-load("~/path/to/gse21779.rda")
-meta <- readRDS(file = 'path/to/meta.RDS')
-data.conteos <- readRDS(file = 'path/to/data.conteos.RDS')
+load("~/datos/gse21779.rda")
+meta <- readRDS(file = '~/datos/meta.RDS')
+data.conteos <- readRDS(file = '~/datos/data.conteos.RDS')
 
 ############################################################
 #1. Con los datos gse21779 muestra las cinco primera filas y las cinco primeras columnas.
 ############################################################
 
+exprs(gse21779)[1:5,1:5]
+
 ############################################################
 #2. ¿Qué son los valores que aparecen en las nombres de columna? Ejemplo GSM542488.CEL.gz (revisa lo que descargaste si tienes dudas)
 ############################################################
+
+# las muestras
 
 ############################################################
 #3. ¿Qué es lo que hay en las filas? ¿Cómo puedes obtener el nombre? Saca los 5 primeros. Ejemplo `1007_s_at` ¿Qué tamaño tiene? 54675 
 ############################################################
 
+featureNames(gse21779)
+
+# las sondas del gen
+
 ############################################################
-#4. Mapea el nombre de las sondas a genes, por ejemplo usa Gene symbol (nombre oficial del gen) y EntrezID (identificador numérico único asignado a cada gen dentro de la base de datos de Entrez Gene del NCBI). **Ayuda**, busca en Bioconductor el paquete que te coincida con la salida de `annotation(gse21779)`. Imprime por pantalla los 6 primeros elementos de un dataframe (llámalo gene_info) que tenga tres columnas PROBEID, SYMBOL y ENTREZID. Después mira a ver cuántos NAs hay en cada columna
+# 4. Mapea el nombre de las sondas a genes, por ejemplo usa Gene symbol (nombre oficial del gen) y EntrezID (identificador numérico único asignado a cada gen dentro de la base de datos de Entrez Gene del NCBI). **Ayuda**, busca en Bioconductor el paquete que te coincida con la salida de `annotation(gse21779)`. Imprime por pantalla los 6 primeros elementos de un dataframe (llámalo gene_info) que tenga tres columnas PROBEID, SYMBOL y ENTREZID. Después mira a ver cuántos NAs hay en cada columna
 ############################################################
 
 # PISTA: ¿te ha salido este mensaje? `'select()' returned 1:many mapping between keys and columns`. 
 # Piensa un poco por qué, pero ahora tienes un gene_info con 57151 filas y se supone que estás mapeando el nombre de las sondas a genes. 
 # Además, tienes 10025 sondas que no tienen nombre del gen ni entrezID. Obten las primeras 15 sondas que no tienen valor en SYMBOL, verás que el segundo es la sonda 1552563_a_at que no se corresponde a ningún gen, sino a C8orf6 (chromosome 8 open reading frame 6).
+
+annotation(gse21779)
 
 ############################################################
 # 5. Busca aquellas filas que tengan duplicados. Utiliza dplyr
@@ -68,6 +78,10 @@ data.conteos <- readRDS(file = 'path/to/data.conteos.RDS')
 ############################################################
 # 14. ¿Cuántas pacientes de la cohorte TCGA-BRCA tienen subtipo Her2 de acuerdo a la clasificación PAM50? Haz un table con todos los subtipos para ver números globales
 ############################################################
+
+table(meta$paper_BRCA_Subtype_PAM50)
+
+# 82 pacientes
 
 ############################################################
 # 15. Obten los datos de las cinco primeras pacientes para ver sus conteos. ¿Qué son los nombre de columna y por qué tienen la forma ENSG00000000003.15?
