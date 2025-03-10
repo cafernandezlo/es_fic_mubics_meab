@@ -37,14 +37,44 @@ featureNames(gse21779)
 
 annotation(gse21779)
 
+BiocManager::install("hgu133plus2.db")
+library(hgu133plus2.db)
+
+claves <- keys(hgu133plus2.db,keytype = "PROBEID")
+
+gene_info <- select(hgu133plus2.db,
+                    keys = claves,
+                    columns = c("SYMBOL","ENTREZID"),
+                    keytype = "PROBEID")
+
 ############################################################
 # 5. Busca aquellas filas que tengan duplicados. Utiliza dplyr
 ############################################################
+
+library(dplyr)
+
+df_duplicated <- gene_info %>%
+                group_by(SYMBOL) %>%
+                add_count(SYMBOL)%>%
+                filter(n()>1)
+
+df_duplicated <- gene_info %>%
+  group_by(SYMBOL) %>%
+  filter(n()>1)%>%
+  arrange(SYMBOL)
+
+gene_info %>%
+  group_by(PROBEID) %>%
+  filter(n()>1)%>%
+  arrange(PROBEID)
 
 ############################################################
 # 6. En el ejercicio anterior verás que el gen `DDR1` es uno de los muchos, muestra todas las filas de `gene_info` que contengan en la columna `SYMBOL` el gen `DDR1`
 # PISTA: hay cuatro sondas (1007_s_at, 207169_x_at, 208779_x_at, 210749_x_at) para el mismo gen (DDR1)
 ############################################################
+
+gene_info %>%
+  filter(SYMBOL == 'DDR1')
 
 ############################################################
 # 7. En gse21779 tenemos 1354896 filas. ¿Por qué?
@@ -53,27 +83,103 @@ annotation(gse21779)
 ############################################################
 # 8. Como en gse21779 tenemos muchas sondas, añade una cuarta columna (GENETYPE) a gene_info en el que indiques el tipo de cada sonda. Imprime la salida de la función `head` para gene_info. ¿hay algo que te llame la atención?
 ############################################################
+detach("package:dplyr", unload = TRUE)
+gene_info <- AnnotationDbi::select(hgu133plus2.db,
+                    keys = claves,
+                    columns = c("SYMBOL","ENTREZID","GENETYPE"),
+                    keytype = "PROBEID")
+
+head(gene_info)
 
 ############################################################
 # 9. Obtén el número de elementos de cada tipo (y los propios tipos, incluyendo los NAs) que hay en la columna GENETYPE del dataframe gene_info. Fíjate que ahora gene_info tiene 100649403 filas, de los cuáles 100500625 son NAs :)
 ############################################################
 
+table(gene_info$GENETYPE, useNA = "ifany")
+
 ############################################################
 # 10. Usando dplyr busca las 5 primeras filas que contengan NAs en la columna GENETYPE. Se corresponde con la sonda 1552258_at que es de C2orf59 long intergenic non-protein coding RNA.
 ############################################################
+
+gene_info %>%
+  filter(is.na(GENETYPE)) %>%
+  head(5)
 
 ############################################################
 # 11. Cuando os indiqué que ejecutáis este comando `head(assay(parathyroidGenesSE),n=2)`, en las filas tenemos elementos de nombre ENSG00000000003. ¿Qué es esto?
 ############################################################
 
+# los genes
+
 ############################################################
 # 12. Es decir, se trabaja con Gene Symbol, EntrezID, sondas affymetrix e indicadores únicos de Ensembl (y más!). Crea un primer diccionario mediante el paquete biomaRt que tenga Gene Symbol, entrezid e identificador único de ensembl a partir de todos los identificadores Ensembl que tenga el paquete.
-# PISTA: obtendrás 91718 Ensembl ID, haz de nuevo un table para ver el `gene_biotype`. Por ejemplo verás que salen 24057 protein_coding
+# PISTA: obtendrás 78610 Ensembl ID, haz de nuevo un table para ver el `gene_biotype`. Por ejemplo verás que salen 24057 protein_coding
 ############################################################
+
+pacman::p_load(biomaRt)
+
+# Conectar con Ensembl usando biomaRt
+# en caso de querer descargar de humano:
+# ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+# también se podría usar usar useEnsembl()
+
+# Obtener la información necesaria
+gene_data <- getBM(attributes = c("ensembl_gene_id", 
+                                  "external_gene_name", 
+                                  "entrezgene_id", 
+                                  "gene_biotype"),
+                   mart = ensembl)
+print(head(gene_data))
+detach("package:biomaRt", unload = TRUE)
 
 ############################################################
 # 13. Ahora crea un nuevo objeto a partir de los nombres de gen único de ensembl de parathyroidGenesSE que puedas usar como diccionario y que tenga asociado su external_gene_name, entrezgene_id y gene_biotype para cada ensembl_gene_id. Obtén el tamaño y haz de nuevo el table de la columna gene_biotype. ¿Cuántos id únicos de ensembl son de protein_coding y cuántos de lncRNA?
 ############################################################
+
+#20856 protein_coding y 11884 lncRNA
+pacman::p_load(biomaRt,SummarizedExperiment,parathyroidSE)
+data(parathyroidGenesSE,package="parathyroidSE")
+
+# Conecta con Ensembl mediante biomaRt
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+# Supongamos que tienes el objeto parathyroidGenesSE
+# Extraer los rownames
+ensembl_ids <- rownames(assay(parathyroidGenesSE))
+
+# ojo:
+# > tail(ensembl_ids)
+# [1] "LRG_93" "LRG_94" "LRG_96" "LRG_97" "LRG_98" "LRG_99"
+
+# Obtener la información deseada de Ensembl
+gene_data <- getBM(attributes = c("ensembl_gene_id", 
+                                  "external_gene_name", 
+                                  "entrezgene_id", 
+                                  "gene_biotype"),
+                   filters = "ensembl_gene_id",
+                   values = ensembl_ids,
+                   mart = ensembl)
+
+# Convertir en data frame con ENSG como primera columna
+result <- data.frame(ENSEMBL_ID = ensembl_ids, stringsAsFactors = FALSE)
+
+# Unir con la información obtenida
+result <- merge(result, 
+                gene_data, 
+                by.x = "ENSEMBL_ID", by.y = "ensembl_gene_id", 
+                all.x = TRUE)
+
+# Mostrar las primeras filas del resultado
+print(head(result))
+detach("package:biomaRt", unload = TRUE)
+detach("package:SummarizedExperiment", unload = TRUE)
+
+# con R base podemos seleccionar igual que con dplyr filas y columnas
+# para ello usamos el operador [,] sabiendo que el filtrado se hace
+# [filas,columnas]
+# gene_data[gene_data$ensembl_gene_id %in% ensembl_ids,]
 
 ############################################################
 # 14. ¿Cuántas pacientes de la cohorte TCGA-BRCA tienen subtipo Her2 de acuerdo a la clasificación PAM50? Haz un table con todos los subtipos para ver números globales
