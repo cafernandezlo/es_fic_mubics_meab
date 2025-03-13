@@ -257,22 +257,136 @@ data.conteos[1:5,1:5]
 # 16. Usando `dplyr` obten todas las columnas que tengan como nombre un gen que comience por `ENSG00000185960`. ¿Por qué tiene ENSG00000185960.14 y ENSG00000185960.14_PAR_Y?
 ############################################################
 
+pacman::p_load(dplyr)
+
+data.conteos %>%
+  select(starts_with("ENSG00000185960"))
+
+detach("package:dplyr", unload = TRUE)
+
+# Esto sugiere que esas columnas representan diferentes aspectos o versiones del mismo gen:
+# 
+# - **ENSG00000185960.14**: Este es el identificador estándar del gen en Ensembl con una versión específica.
+# 
+# - **ENSG00000185960.14_PAR_Y**: Esto probablemente indica que se trata de la región pseudoautosómica en el cromosoma Y. Las regiones pseudoautosómicas (PAR) son regiones donde los cromosomas X e Y comparten homología.
+# 
+# Tener ambas columnas puede significar que estás analizando datos que consideran tanto la copia general del gen como su comportamiento en la región PAR en sistemas de determinación sexual.
+
 ############################################################
 # 17. Investiga acerca del objeto `ExpressionSet` del paquete `BioBase`, usado para almacenar matrices de expresión junto con datos fenotípicos y de características. Usos y métodos habituales.
 ############################################################
+# https://www.bioconductor.org/packages/devel/bioc/vignettes/Biobase/inst/doc/ExpressionSetIntroduction.pdf
 
 ############################################################
 # 18. Investiga acerca del objeto `SummarizedExperiment` objeto contenedor típico de `Bioconductor`, usado para almacenar matrices de conteos, junto con metadatos de fila y columna. Usos y métodos habituales.
 ############################################################
+# https://bioconductor.org/packages/release/bioc/html/SummarizedExperiment.html
 
 ############################################################
 # 19. Utilizando `ggplot2` genera un boxplot donde representes la expresión de los genes TP53, PIK3CA, GATA3 y KMT2C, para cada subtipo PAM50, solo para pacientes que tengan `Primary solid Tumor`
 ############################################################
 
+pacman::p_load(ggplot2, dplyr, tidyr)
+
+genes_symbols <- c("TP53", "PIK3CA", "GATA3", "KMT2C")
+
+gene_symbols_map <- gene_data %>%
+  filter(external_gene_name %in% genes_symbols)
+
+colnames(data.conteos) <- sub("\\..*$", "", colnames(data.conteos))
+
+#Esta información está en gene_symbols_map, se hace para mostrar el uso del operador %in%
+selected_columns <- colnames(data.conteos)[colnames(data.conteos) %in% gene_symbols_map$ensembl_gene_id]
+
+data_conteos_filtered <- data.conteos %>%
+  select(all_of(selected_columns))
+
+colnames(data_conteos_filtered) <- gene_symbols_map$external_gene_name[match(colnames(data_conteos_filtered), gene_symbols_map$ensembl_gene_id)]
+
+meta_filtered <- as.data.frame(meta) %>%
+  filter(definition == "Primary solid Tumor")
+
+data_conteos_filtered <- data_conteos_filtered %>%
+  filter(rownames(data_conteos_filtered) %in% rownames(meta_filtered))
+
+data_long <- data_conteos_filtered %>%
+  mutate(PAM50_Subtype = meta_filtered$paper_BRCA_Subtype_PAM50[match(rownames(.), rownames(meta_filtered))])%>%
+  pivot_longer(cols = KMT2C:TP53,names_to = "Gene", values_to = "Expression")
+
+ggplot(data_long, aes(x = PAM50_Subtype, y = Expression, fill = Gene)) +
+  geom_boxplot() +
+  facet_wrap(~ Gene, scales = "free") +
+  theme_minimal() +
+  labs(title = "Gene Expression por subtipo PAM50",
+       x = "Subtipo PAM50",
+       y = "Expression Level") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+detach("package:ggplot2", unload = TRUE)
+detach("package:dplyr", unload = TRUE)
+detach("package:tidyr", unload = TRUE)
+
 ############################################################
 # 20. Utilizando `ggplot2` genera un boxplot donde representes la expresión de los genes TP53 tanto de la copia general del gen, como de la región PAR del mismo, para cada `ajcc_pathologic_t`
 ############################################################
 
+pacman::p_load(ggplot2, dplyr, tidyr)
+
+tp53_ensembl_id <- gene_data %>%
+  filter(external_gene_name == "TP53") %>%
+  pull(ensembl_gene_id)
+
+data_conteos_filtered <- data.conteos %>%
+  select(starts_with(tp53_ensembl_id))%>%
+  mutate(ajcc_pathologic_t = meta_filtered$ajcc_pathologic_t[match(rownames(.), rownames(meta_filtered))])
+
+# solamente hay uno
+
+data_long <- pivot_longer(data_conteos_filtered, 
+                          cols = ENSG00000141510,
+                          names_to = "transcript",
+                          values_to = "expression")
+
+ggplot(data_long, aes(x = ajcc_pathologic_t, y = expression, fill = transcript)) +
+  geom_boxplot() +
+  labs(title = "Comparación de la expresión de transcritos de TP53",
+       x = "Transcrito",
+       y = "Expresión") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+detach("package:ggplot2", unload = TRUE)
+detach("package:dplyr", unload = TRUE)
+detach("package:tidyr", unload = TRUE)
+
 ############################################################
 # 21. Utilizando biomaRt, descarga las secuencias de algún gen tanto en homo sapiens como en mus musculus y realiza el alineamiento local y global para ver el grado de conservación del gen entre especies. Investiga qué valores podías obtener con [pwalign](https://bioconductor.org/packages/release/bioc/html/pwalign.html). Puedes apoyarte en el [UCSC Genome Browser](https://genome.ucsc.edu/index.html) para buscar genes compartidos entre ambas.
 ############################################################
+
+pacman::p_load(pwalign, biomaRt)
+human_mart <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+# Obtén la secuencia del gen TP53 en humanos
+human_seq <- getSequence(id = "ENSG00000141510", 
+                         type = "ensembl_gene_id", 
+                         seqType = "coding", 
+                         mart = human_mart)[1, "coding"]
+
+# Configura biomaRt para Mus musculus
+mouse_mart <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+# Obtén la secuencia del gen TP53 en ratones
+mouse_seq <- getSequence(id = "ENSMUSG00000059552", 
+                         type = "ensembl_gene_id", 
+                         seqType = "coding", 
+                         mart = mouse_mart)[1, "coding"]
+# Alineamiento global
+global_align <- pairwiseAlignment(human_seq, mouse_seq, type = "global")
+print(global_align)
+
+# Alineamiento local
+local_align <- pairwiseAlignment(human_seq, mouse_seq, type = "local")
+print(local_align)
+
+detach("package:pwalign", unload = TRUE)
+detach("package:biomaRt", unload = TRUE)
