@@ -1,7 +1,7 @@
 # Ejercicios resueltos Boletín 1
 
 # carga de datos 
-# disponibles en el siguiente enlace: https://udcgal-my.sharepoint.com/:u:/g/personal/carlos_fernandez_udc_es/EV5v2btIVYdEu2iMzNE3liEBnaRI6jNsx9rgkilFd5Fonw?e=9aT0pB
+# disponibles en el siguiente enlace: https://udcgal-my.sharepoint.com/:u:/g/personal/carlos_fernandez_udc_es/IQDA-m4KvHdeRpYEcFmGcSJBAWjyzYRBmP05IaUZTMKO0s4?e=Tzs2fM
 
 load("~/datos/GSE21779/gse21779.rda")
 meta <- readRDS(file = '~/datos/TCGA-BRCA/meta.RDS')
