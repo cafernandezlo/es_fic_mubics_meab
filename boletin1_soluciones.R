@@ -11,17 +11,43 @@ data.conteos <- readRDS(file = '~/datos/TCGA-BRCA/data.conteos.RDS')
 #1. Con los datos gse21779 muestra las cinco primera filas y las cinco primeras columnas.
 ############################################################
 
-exprs(gse21779)[1:5,1:5]
+# La función `exprs()` extrae del objeto `AffyBatch` la **matriz de intensidades crudas**: filas = sondas individuales del chip, columnas = muestras (archivos CEL). Indexamos `[1:5, 1:5]` para ver un subconjunto manejable. `intensity()` es sinónimo de `exprs()` para objetos Affy. `geneNames()` devuelve los identificadores de probe sets (los nombres de fila tras el resumen, 54675 probe sets).
+
+exprs(gse21779)[1:5, 1:5]
+intensity(gse21779)[1:5, 1:5]
 
 ############################################################
 #2. ¿Qué son los valores que aparecen en las nombres de columna? Ejemplo GSM542488.CEL.gz (revisa lo que descargaste si tienes dudas)
 ############################################################
 
+# Los nombres de columna son los **nombres de los archivos CEL** descargados de GEO. Cada archivo CEL corresponde a una muestra biológica
+# escaneada con el chip Affymetrix. El nombre se descompone así:
+# - **GSM542488**: identificador único de muestra en GEO (*GEO Sample*). Permite localizar la muestra en [https://www.ncbi.nlm.nih.gov/geo/](https://www.ncbi.nlm.nih.gov/geo/).
+# - **.CEL**: formato propietario de Affymetrix que almacena las intensidades de fluorescencia píxel a píxel de cada celda del chip.
+
+colnames(exprs(gse21779))[1:5]
+
 ############################################################
 #3. ¿Qué es lo que hay en las filas? ¿Cómo puedes obtener el nombre? Saca los 5 primeros. Ejemplo `1007_s_at` ¿Qué tamaño tiene? 54675 
 ############################################################
 
-# revisa el documento Arrancando con... affyBatch
+# Las filas de `exprs(gse21779)` (en su estado crudo, antes de normalizar) contienen **sondas individuales**.Pero los **nombres de fila accesibles via `featureNames()`** son los **probe set IDs**: identificadores como `1007_s_at` que agrupan ~11-20 sondas del mismo gen. El chip hgu133plus2 tiene **54675 probe sets**.
+
+#Los sufijos del identificador tienen significado:
+
+#| Sufijo | Significado |
+#|--------|-------------|
+#| `_at` | Sonda estándar anti-sense |
+#| `_s_at` | Reconoce múltiples transcritos del mismo gen |
+#| `_x_at` | Posible hibridación cruzada con genes parálogos |
+#| `_a_at` | Representación alternativa del mismo gen |
+
+# Primeros 5 probe set IDs
+featureNames(gse21779)[1:5]
+
+# Número total de probe sets
+length(featureNames(gse21779))
+
 
 ############################################################
 # 4. Mapea el nombre de las sondas a genes, por ejemplo usa Gene symbol (nombre oficial del gen) y EntrezID (identificador numérico único asignado a cada gen dentro de la base de datos de Entrez Gene del NCBI). **Ayuda**, busca en Bioconductor el paquete que te coincida con la salida de `annotation(gse21779)`. Imprime por pantalla los 6 primeros elementos de un dataframe (llámalo gene_info) que tenga tres columnas PROBEID, SYMBOL y ENTREZID. Después mira a ver cuántos NAs hay en cada columna
@@ -32,26 +58,93 @@ exprs(gse21779)[1:5,1:5]
 # un mismo `PROBEID` se asocia con múltiples `SYMBOL` o `ENTREZID`.
 # Para resolverlo, tendrías que decidir cómo quieres manejar estas relaciones múltiples
 # No hay una única opción, depende de las necesidades de cada momento.
-
-# Opciones:
-# Filtrar por una sola asignación (la primera)
-# Mantener la estructura y analizar manualmente
-# Ver lo que sucede con las PROBEID y analizar pasos a realizar
-# ...
-
 # Además, tienes 10025 sondas que no tienen nombre del gen ni entrezID. Obten las primeras 15 sondas que no tienen valor en SYMBOL, verás que el segundo es la sonda 1552563_a_at que no se corresponde a ningún gen, sino a C8orf6 (chromosome 8 open reading frame 6).
+
+gse21779  # hgu133plus2
+# https://bioconductor.org/packages/release/data/annotation/html/hgu133plus2.db.html
+
+pacman::p_load(hgu133plus2.db)
+
+probe_names <- featureNames(gse21779)
+
+# Mapeamos probe sets → SYMBOL + ENTREZID
+gene_info <- select(hgu133plus2.db,
+                    keys    = probe_names,
+                    columns = c("SYMBOL", "ENTREZID"),
+                    keytype = "PROBEID")
+detach("package:hgu133plus2.db", unload = TRUE)
+
+# Primeras 6 filas
+print(head(gene_info))
+
+#El paquete de anotación que coincide con `annotation(gse21779)` = `"hgu133plus2"` es # #**`hgu133plus2.db`** de Bioconductor. La función `select()` realiza la consulta. El mensaje #`'select()' returned 1:many mapping` indica que algunas sondas mapean a **más de un gen**: el #resultado tiene **57151 filas** aunque solo hay 54675 probe sets, porque algunos probe sets están #anotados a varias entidades. Las **10025 sondas sin SYMBOL ni ENTREZID** corresponden a: sondas de #control interno, regiones intergénicas, ORFs no caracterizados y lncRNAs descubiertos después del #diseño del chip.
+
+# Dimensiones: observamos las 57151 filas por el mapeo 1:many
+dim(gene_info)
+
+# Conteo de NAs por columna
+na_counts <- colSums(is.na(gene_info))
+print(na_counts)
+
+# Primeras 15 sondas sin anotación SYMBOL
+library(dplyr)
+na_symbol_info <- gene_info %>%
+  filter(is.na(SYMBOL)) %>%
+  head(15)
+print(na_symbol_info)
+
+# Sonda 
+library(biomaRt)
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+probe_1552 <- getBM(attributes = c('affy_hg_u133_plus_2', 'chromosome_name', 'start_position', 'end_position'),
+      filters = 'affy_hg_u133_plus_2',
+      values = "1552563_a_at",
+      mart = ensembl)
+print(probe_1552)
+detach("package:dplyr", unload = TRUE)
+
 
 ############################################################
 # 5. Busca aquellas filas que tengan duplicados. Utiliza dplyr
 ############################################################
 
-# ¿Qué es un duplicado para ti? En función de eso, usa la columna adecuada
-# En clase vimos diferentes opciones
+# Un gen puede aparecer en múltiples filas de `gene_info` porque el chip incluye **varias sondas para el mismo gen** (diferentes exones, isoformas, o redundancia de control de calidad). Agrupamos por SYMBOL y filtramos los grupos con `n() > 1`.
+
+pacman::p_load(dplyr)
+
+duplicated_gene_info <- gene_info %>%
+  group_by(SYMBOL) %>%
+  filter(n() > 1) %>%
+  ungroup() 
+
+# Primeras filas para ilustrar
+print(head(duplicated_gene_info, 20))
+
+# Número de filas duplicadas
+nrow(duplicated_gene_info)
+
+detach("package:dplyr", unload = TRUE)
 
 ############################################################
 # 6. En el ejercicio anterior verás que el gen `DDR1` es uno de los muchos, muestra todas las filas de `gene_info` que contengan en la columna `SYMBOL` el gen `DDR1`
 # PISTA: hay cuatro sondas (1007_s_at, 207169_x_at, 208779_x_at, 210749_x_at) para el mismo gen (DDR1)
 ############################################################
+
+# DDR1 (*Discoidin Domain Receptor Tyrosine Kinase 1*) tiene **4 sondas** en el chip:
+
+# - `1007_s_at` (`_s_at`): reconoce múltiples transcritos de DDR1.
+# - `207169_x_at`, `208779_x_at`, `210749_x_at` (`_x_at`): pueden tener hibridación cruzada con DDR2 u otros miembros de la familia. Las tres cubren regiones distintas del gen y aportan redundancia para confirmar la señal.
+
+pacman::p_load(dplyr)
+
+ddr1_rows <- gene_info %>%
+  filter(SYMBOL == "DDR1")
+
+print(ddr1_rows)
+
+detach("package:dplyr", unload = TRUE)
+
 
 ############################################################
 # 7. En gse21779 tenemos 1354896 filas. ¿Por qué?
@@ -64,9 +157,53 @@ exprs(gse21779)[1:5,1:5]
 # 5. Variabilidad Técnica: Ayuda a mitigar la variabilidad técnica inherente al proceso de hibridación en microarreglos.
 # 6. Revisa el documento Arrancando con... affyBatch
 
+# `exprs(gse21779)` sobre un objeto `AffyBatch` sin normalizar devuelve las intensidades a nivel de **sonda individual**, no de probe set. El número surge de:
+
+# - El chip hgu133plus2 tiene **54675 probe sets**, cada uno con aproximadamente **22 sondas** (Perfect Match y MisMatch).
+# - 54675 × 22 ≈ **1 202 850** sondas de hibridación.
+# - A eso se suman sondas de **control interno** (BioB, BioC, BioD, CreX, AFFX-controls) que suman las restantes hasta alcanzar **1 354 896**.
+
+# Este es el nivel crudo; tras `rma()` o `mas5()` se colapsa a 54675 valores (uno por probe set).
+
+# Confirmamos las dimensiones: sondas individuales × muestras
+dim(intensity(gse21779))
+
+# Número de probe sets (tras el resumen)
+length(geneNames(gse21779))
+
+# Ratio aproximado: sondas / probe sets
+nrow(intensity(gse21779)) / length(geneNames(gse21779))
+
+
 ############################################################
 # 8. Como en gse21779 tenemos muchas sondas, añade una cuarta columna (GENETYPE) a gene_info en el que indiques el tipo de cada sonda. Imprime la salida de la función `head` para gene_info. ¿hay algo que te llame la atención?
 ############################################################
+
+# Usamos `org.Hs.eg.db` para obtener el tipo biológico de cada gen a partir de su ENTREZID. Lo **llamativo** es que tras el `left_join` el dataframe crece de forma explosiva (de ~57 000 a más de 100 millones de filas). Esto ocurre porque `select()` sobre `org.Hs.eg.db` puede devolver **múltiples filas por ENTREZID** (distintas entradas de GENETYPE), y el `left_join` realiza el producto cartesiano de todas las coincidencias. Además, los ~10025 ENTREZID que eran NA siguen siendo NA en GENETYPE.
+
+pacman::p_load(org.Hs.eg.db)
+
+# Obtenemos el tipo de gen para cada ENTREZID presente en gene_info
+gene_types <- select(org.Hs.eg.db,
+                     keys    = gene_info$ENTREZID,
+                     columns = "GENETYPE",
+                     keytype = "ENTREZID")
+
+detach("package:org.Hs.eg.db", unload = TRUE)
+
+library(dplyr)
+
+# El left_join puede causar expansión si hay duplicados en gene_types
+gene_info <- gene_info %>%
+  left_join(gene_types, by = "ENTREZID")
+
+detach("package:dplyr", unload = TRUE)
+
+# Lo que llama la atención: el número de filas explota
+dim(gene_info)
+
+# Y la mayoría son NAs en GENETYPE
+print(head(gene_info))
 
 ############################################################
 # 9. Obtén el número de elementos de cada tipo (y los propios tipos, incluyendo los NAs) que hay en la columna GENETYPE del dataframe gene_info. Fíjate que ahora gene_info tiene 100649403 filas, de los cuáles 100500625 son NAs :)
