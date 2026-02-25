@@ -48,7 +48,6 @@ featureNames(gse21779)[1:5]
 # Número total de probe sets
 length(featureNames(gse21779))
 
-
 ############################################################
 # 4. Mapea el nombre de las sondas a genes, por ejemplo usa Gene symbol (nombre oficial del gen) y EntrezID (identificador numérico único asignado a cada gen dentro de la base de datos de Entrez Gene del NCBI). **Ayuda**, busca en Bioconductor el paquete que te coincida con la salida de `annotation(gse21779)`. Imprime por pantalla los 6 primeros elementos de un dataframe (llámalo gene_info) que tenga tres columnas PROBEID, SYMBOL y ENTREZID. Después mira a ver cuántos NAs hay en cada columna
 ############################################################
@@ -104,7 +103,6 @@ probe_1552 <- getBM(attributes = c('affy_hg_u133_plus_2', 'chromosome_name', 'st
 print(probe_1552)
 detach("package:dplyr", unload = TRUE)
 
-
 ############################################################
 # 5. Busca aquellas filas que tengan duplicados. Utiliza dplyr
 ############################################################
@@ -145,7 +143,6 @@ print(ddr1_rows)
 
 detach("package:dplyr", unload = TRUE)
 
-
 ############################################################
 # 7. En gse21779 tenemos 1354896 filas. ¿Por qué?
 ############################################################
@@ -173,7 +170,6 @@ length(geneNames(gse21779))
 
 # Ratio aproximado: sondas / probe sets
 nrow(intensity(gse21779)) / length(geneNames(gse21779))
-
 
 ############################################################
 # 8. Como en gse21779 tenemos muchas sondas, añade una cuarta columna (GENETYPE) a gene_info en el que indiques el tipo de cada sonda. Imprime la salida de la función `head` para gene_info. ¿hay algo que te llame la atención?
@@ -208,29 +204,176 @@ print(head(gene_info))
 ############################################################
 # 9. Obtén el número de elementos de cada tipo (y los propios tipos, incluyendo los NAs) que hay en la columna GENETYPE del dataframe gene_info. Fíjate que ahora gene_info tiene 100649403 filas, de los cuáles 100500625 son NAs :)
 ############################################################
+table(gene_info$GENETYPE, useNA = "ifany")
+
+#Si filtramos las filas repetidas
+library(dplyr)
+gene_info_u <- gene_info %>%
+  distinct()
+
+table(gene_info_u$GENETYPE, useNA = "ifany")
+detach("package:dplyr", unload = TRUE)
 
 ############################################################
 # 10. Usando dplyr busca las 5 primeras filas que contengan NAs en la columna GENETYPE. Se corresponde con la sonda 1552258_at que es de C2orf59 long intergenic non-protein coding RNA.
 ############################################################
+library(dplyr)
+
+na_gene_info <- gene_info %>%
+  filter(is.na(GENETYPE)) %>%
+  head(5)
+
+print(na_gene_info)
+
+detach("package:dplyr", unload = TRUE)
 
 ############################################################
 # 11. Cuando os indiqué que ejecutáis este comando `head(assay(parathyroidGenesSE),n=2)`, en las filas tenemos elementos de nombre ENSG00000000003. ¿Qué es esto?
 ############################################################
 
-# ENSG00000000003 es un identificador único de Ensembl para un gen en el sistema de anotación genómica Ensembl. Estos identificadores son parte del estándar para referencias genómicas y se utilizan para seguir la información detallada de genes a través de diversas bases de datos y herramientas bioinformáticas.
+# ENSG00000000003 es un **identificador estable de Ensembl para un gen humano**
+# La estructura es:
+# - **ENS**: prefijo Ensembl
+# - **G**: tipo de feature (Gene; T = Transcript, P = Protein, E = Exon)
+# - **00000000003**: número secuencial de 11 dígitos, único para cada gen
+# - Prefijo de especie implícito: ENSG = Homo sapiens; ENSMUSG = Mus musculus
+#
+# En RNA-seq se usan IDs de Ensembl porque son:
+# 1. **Unívocos**: cada gen tiene un ID único e irrepetible
+# 2. **Estables**: no cambian entre releases (a diferencia del Gene Symbol)
+# 3. **Versionados**: ENSG00000000003.15 indica la versión 15 del gen
+#
+# Ventaja sobre Gene Symbol: Los símbolos pueden tener sinónimos, cambiar
+# de nombre, o ser ambiguos. El ID de Ensembl identifica inequívocamente
+# la entidad genómica usada en el pipeline de mapeo (ejercicio 15).
+
+pacman::p_load(SummarizedExperiment, parathyroidSE)
+data(parathyroidGenesSE, package = "parathyroidSE")
+
+# Mostramos 2 filas: los nombres de fila son IDs Ensembl
+head(assay(parathyroidGenesSE), n = 2)
+
+# Los primeros 5 IDs de Ensembl
+rownames(assay(parathyroidGenesSE))[1:5]
 
 ############################################################
 # 12. Es decir, se trabaja con Gene Symbol, EntrezID, sondas affymetrix e indicadores únicos de Ensembl (y más!). Crea un primer diccionario mediante el paquete biomaRt que tenga Gene Symbol, entrezid e identificador único de ensembl a partir de todos los identificadores Ensembl que tenga el paquete.
 # PISTA: obtendrás 78610 Ensembl ID, haz de nuevo un table para ver el `gene_biotype`. Por ejemplo verás que salen 24057 protein_coding
 ############################################################
 
+pacman::p_load(biomaRt)
+
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+gene_data <- getBM(
+  attributes = c("ensembl_gene_id", "external_gene_name",
+                 "entrezgene_id",   "gene_biotype"),
+  mart = ensembl
+)
+
+print(head(gene_data))
+dim(gene_data)                          # ~91688 filas
+table(gene_data$gene_biotype)           # 24080 protein_coding
+
+detach("package:biomaRt", unload = TRUE)
+
 ############################################################
 # 13. Ahora crea un nuevo objeto a partir de los nombres de gen único de ensembl de parathyroidGenesSE que puedas usar como diccionario y que tenga asociado su external_gene_name, entrezgene_id y gene_biotype para cada ensembl_gene_id. Obtén el tamaño y haz de nuevo el table de la columna gene_biotype. ¿Cuántos id únicos de ensembl son de protein_coding y cuántos de lncRNA?
 ############################################################
 
+# A diferencia del ejercicio 12 (que descargaba **todos** los genes del 
+# genoma humano, ~91718), ahora filtramos `getBM()` para que solo devuelva 
+# información de los **63193 genes presentes** en `parathyroidGenesSE`. 
+# Usamos `filters = "ensembl_gene_id"` y `values = ensembl_ids` para 
+# limitar la consulta a Ensembl.
+
+# **ADVERTENCIA:** Aquí también ocurre **1:many mapping**. Algunos IDs de 
+# Ensembl devuelven múltiples filas en `getBM()` por tener múltiples 
+# anotaciones (entrezgene_id alternativo, gene_biotype duplicado, etc.). 
+# El `merge()` propagará estas duplicaciones, inflando el resultado de 
+# 63193 a ~65000+ filas. Para el análisis posterior, deberías quedarte 
+# con **una fila por gen** usando `distinct()`.
+
+# Sin dups tenemos: 20333 protein_coding y 11724 lncRNA
+# Con dups tenemos: 20869 protein_coding y 11883 lncRNA
+
+
+pacman::p_load(biomaRt, SummarizedExperiment, dplyr)
+
+ensembl     <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+ensembl_ids <- rownames(assay(parathyroidGenesSE)) 
+
+gene_data <- getBM(
+  attributes = c("ensembl_gene_id", "external_gene_name",
+                 "entrezgene_id",   "gene_biotype"),
+  filters    = "ensembl_gene_id",
+  values     = ensembl_ids,
+  mart       = ensembl
+)
+
+# PROBLEMA: getBM puede devolver múltiples filas para el mismo ensembl_gene_id
+# Verificamos si hay duplicados
+duplicados <- gene_data %>%
+  group_by(ensembl_gene_id) %>%
+  filter(n() > 1) %>%
+  arrange(ensembl_gene_id)
+
+# Eliminar duplicados manteniendo la primera ocurrencia
+gene_data_unique <- gene_data %>%
+  distinct(ensembl_gene_id, .keep_all = TRUE)
+
+# Diccionario con todos los IDs originales (all.x = TRUE para no perder ninguno)
+result <- data.frame(ENSEMBL_ID = ensembl_ids, stringsAsFactors = FALSE)
+result <- merge(result, gene_data_unique,
+                by.x = "ENSEMBL_ID", by.y = "ensembl_gene_id",
+                all.x = TRUE)
+dim(result)
+print(head(result))
+
+# Conteo de tipos de genes
+table(result$gene_biotype, useNA = "ifany")
+
+
+# Sin quitar dulpicados
+result_con_duplicados <- data.frame(ENSEMBL_ID = ensembl_ids, 
+                                     stringsAsFactors = FALSE)
+result_con_duplicados <- merge(result_con_duplicados, gene_data,
+                                by.x = "ENSEMBL_ID", 
+                                by.y = "ensembl_gene_id",
+                                all.x = TRUE)
+
+# Conteo de tipos de genes
+table(result_con_duplicados$gene_biotype, useNA = "ifany")
+
+detach("package:biomaRt", unload = TRUE)
+detach("package:SummarizedExperiment", unload = TRUE)
+detach("package:dplyr", unload = TRUE)
+
+
 ############################################################
 # 14. ¿Cuántas pacientes de la cohorte TCGA-BRCA tienen subtipo Her2 de acuerdo a la clasificación PAM50? Haz un table con todos los subtipos para ver números globales
 ############################################################
+# PAM50 (Prediction Analysis of Microarray 50) clasifica los tumores de 
+# mama en 5 subtipos intrínsecos basándose en la expresión de 50 genes:
+# 
+# | Subtipo | Caracterización molecular | Pronóstico |
+# |---------|--------------------------|------------|
+# | LumA    | ER+, PR+, HER2−, Ki67 bajo | Mejor |
+# | LumB    | ER+, HER2± Ki67 alto | Intermedio |
+# | Her2    | HER2 amplificado | Mejorado con Trastuzumab |
+# | Basal   | Triple negativo (ER−, PR−, HER2−) | Peor, sensible a quimio |
+# | Normal  | Perfil similar a epitelio normal | Variable |
+#
+# Her2 es un subtipo caracterizado por amplificación del gen HER2, 
+# lo que indica un peor pronóstico pero mejor respuesta a terapia 
+# dirigida (Trastuzumab/Herceptin). Representa ~15-20% de canceres mama.
+
+# Tabla de subtipos PAM50
+table(meta$paper_BRCA_Subtype_PAM50)
+
+# Con proporciones
+round(prop.table(table(meta$paper_BRCA_Subtype_PAM50)) * 100, 1)
+
 
 ############################################################
 # 15. Obten los datos de las cinco primeras pacientes para ver sus conteos. ¿Qué son los nombre de columna y por qué tienen la forma ENSG00000000003.15?
