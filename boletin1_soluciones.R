@@ -378,10 +378,47 @@ round(prop.table(table(meta$paper_BRCA_Subtype_PAM50)) * 100, 1)
 ############################################################
 # 15. Obten los datos de las cinco primeras pacientes para ver sus conteos. ¿Qué son los nombre de columna y por qué tienen la forma ENSG00000000003.15?
 ############################################################
+#Las líneas comentan el **formato de los identificadores de genes en RNA-seq**:
+## Desglose del ID `ENSG00000000003.15`:
+#- **ENSG00000000003**: Identificador estable único del gen en Ensembl
+#- **.15**: Número de versión de la anotación del gen
+## ¿Por qué cambia la versión?
+#La versión se incrementa cuando Ensembl actualiza:
+#1. **Coordenadas genómicas**: cambian los límites del gen
+#2. **Transcritos**: se descubren nuevos o se eliminan
+#3. **Estructura de exones**: cambian sitios de splicing confirmados experimentalmente
+## ¿Por qué es importante?
+# Incluir la versión garantiza **reproducibilidad**: sabes exactamente qué definición de ese gen se usó cuando procesaste los datos con herramientas como STAR + featureCounts o Salmon. Distintos releases de Ensembl pueden dar resultados diferentes.
+
+data.conteos[1:5, 1:5]
 
 ############################################################
 # 16. Usando `dplyr` obten todas las columnas que tengan como nombre un gen que comience por `ENSG00000185960`. ¿Por qué tiene ENSG00000185960.14 y ENSG00000185960.14_PAR_Y?
 ############################################################
+# Las **regiones pseudoautosómicas (PAR)** son segmentos en los extremos de 
+# los cromosomas X e Y que comparten secuencia idéntica y se comportan como 
+# autosomas (recombinación obligatoria en meiosis masculina). Los genes en 
+# PAR tienen **dos copias activas** en ambos sexos (escapan a la inactivación 
+# del X).
+
+# El pipeline de TCGA cuantifica por separado:
+
+# - `ENSG00000185960.14`: reads mapeados al locus principal (mayoritariamente 
+#   cromosoma X o la entrada canónica).
+# - `ENSG00000185960.14_PAR_Y`: reads mapeados específicamente a la copia del 
+#   cromosoma Y en la región PAR.
+
+# Es el mismo gen, pero en dos ubicaciones diferentes: una copia en el 
+# cromosoma X (o ubicación principal) y otra copia en el cromosoma Y dentro 
+# de la región PAR (PseudoAutosomal Region).
+
+pacman::p_load(dplyr)
+# Seleccionamos todas las columnas cuyo nombre empiece por ese ID Ensembl
+ens5960 <- data.conteos %>%
+  select(starts_with("ENSG00000185960"))
+head(ens5960)
+
+detach("package:dplyr", unload = TRUE)
 
 ############################################################
 # 17. Investiga acerca del objeto `ExpressionSet` del paquete `BioBase`, usado para almacenar matrices de expresión junto con datos fenotípicos y de características. Usos y métodos habituales.
@@ -396,11 +433,195 @@ round(prop.table(table(meta$paper_BRCA_Subtype_PAM50)) * 100, 1)
 ############################################################
 # 19. Utilizando `ggplot2` genera un boxplot donde representes la expresión de los genes TP53, PIK3CA, GATA3 y KMT2C, para cada subtipo PAM50, solo para pacientes que tengan `Primary solid Tumor`
 ############################################################
+pacman::p_load(ggplot2, dplyr, tidyr, biomaRt)
+# options(timeout = 300) Aumento el tiempo de espera en useMart
+
+# 0. Convertir objetos Bioconductor a data.frame: meta es un objeto DFrame (DataFrame de Bioconductor), no un data.frame estándar de R
+meta <- as.data.frame(meta) 
+data.conteos <- as.data.frame(data.conteos)
+
+
+# 1. Filtrar tumor primario
+meta_pt <- meta %>%
+  filter(definition == "Primary solid Tumor")
+
+ids_pt <- rownames(meta_pt)
+data_pt <- data.conteos[ids_pt, ]
+
+
+# 2. Localizar IDs Ensembl de los genes de interés
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+genes_interes <- c("TP53", "PIK3CA", "GATA3", "KMT2C")
+
+mapa <- getBM(
+  attributes = c("ensembl_gene_id", "external_gene_name"),
+  filters    = "external_gene_name",
+  values     = genes_interes,
+  mart       = ensembl
+)
+
+
+# 3 Limpiar nombres de columnas (quitar versión .15)
+colnames(data_pt)[1:5]
+colnames(data_pt) <- sub("\\..*$", "", colnames(data_pt))
+colnames(data_pt)[1:5]
+
+
+# 4. Seleccionar solo columnas de los genes de interés
+selected_columns <- colnames(data_pt)[colnames(data_pt) %in% mapa$ensembl_gene_id]
+data_pt_genes <- data_pt[, selected_columns, drop = FALSE]
+
+
+# 5. Añadimos información de los subtipos
+data_pt_genes$Subtype <- meta_pt[rownames(data_pt_genes), "paper_BRCA_Subtype_PAM50"]
+data_pt_genes$Patient <- rownames(data_pt_genes)
+
+
+# 6. Preparar datos para ggplot2 (formato largo)
+plot_df <- data_pt_genes %>%
+  pivot_longer(
+    cols = all_of(selected_columns),
+    names_to = "ensembl_gene_id",
+    values_to = "Expression"
+  ) %>%
+  left_join(mapa, by = "ensembl_gene_id") %>%
+  dplyr::filter(!is.na(Subtype))
+
+
+# 7. Boxplot
+p <- ggplot(plot_df, aes(x = Subtype, y = Expression, fill = Subtype)) +
+  geom_boxplot(outlier.size = 0.5, alpha = 0.85) +
+  facet_wrap(~ external_gene_name, scales = "free_y", nrow = 2) +
+  scale_fill_manual(values = c(
+    Basal  = "#E41A1C", 
+    Her2   = "#377EB8",
+    LumA   = "#4DAF4A", 
+    LumB   = "#984EA3",
+    Normal = "#FF7F00"
+  )) +
+  labs(
+    title    = "Expresión de genes clave por subtipo PAM50",
+    subtitle = "TCGA-BRCA · Primary solid Tumor",
+    x = "Subtipo PAM50", 
+    y = "Expression", 
+    fill = "Subtipo"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    axis.text.x      = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "lightblue"),
+    strip.text       = element_text(face = "bold"),
+    legend.position  = "bottom"
+  )
+
+print(p)
+
+# Podemos guardar el plot
+ggsave("boxplot_pam50_genes.png", plot = p, 
+       width = 12, height = 8, dpi = 300)
+
+detach("package:ggplot2",  unload = TRUE)
+detach("package:dplyr",    unload = TRUE)
+detach("package:tidyr",    unload = TRUE)
+detach("package:biomaRt",  unload = TRUE)
 
 ############################################################
 # 20. Utilizando `ggplot2` genera un boxplot donde representes la expresión de los genes TP53 tanto de la copia general del gen, como de la región PAR del mismo, para cada `ajcc_pathologic_t`
 ############################################################
+pacman::p_load(ggplot2, dplyr, tidyr)
+
+# 1. Localizar columnas de TP53
+tp53_ensembl_id <- gene_data %>%
+  filter(external_gene_name == "TP53") %>%
+  pull(ensembl_gene_id)
+
+
+# 2. Comprobar si hay región PAR
+tp53 <- data.conteos %>%
+  select(starts_with(tp53_ensembl_id))
+head(tp53)
+
+# solamente hay uno!!!
+
+# 3. Añadimos información sobre ajcc_pathologic_t
+tp53 <- tp53 %>%
+  mutate(ajcc_pathologic_t = meta$ajcc_pathologic_t[match(rownames(.), rownames(meta))])
+colnames(tp53) <- sub("\\..*$", "", colnames(tp53))
+
+# 4. Preparar datos para ggplot2 (formato largo)
+data_long <- pivot_longer(tp53, 
+                          cols = ENSG00000141510,
+                          names_to = "transcript",
+                          values_to = "expression")
+
+p2 <- ggplot(data_long, aes(x = ajcc_pathologic_t, y = expression, fill = transcript)) +
+  geom_boxplot() +
+  labs(title = "Comparación de la expresión de transcritos de TP53",
+       x = "Transcrito",
+       y = "Expresión") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(p2)
+
+ggsave("boxplot_tp53_estadioT.png", plot = p2,
+       width = 12, height = 7, dpi = 300)
+
+detach("package:ggplot2", unload = TRUE)
+detach("package:dplyr", unload = TRUE)
+detach("package:tidyr", unload = TRUE)
 
 ############################################################
 # 21. Utilizando biomaRt, descarga las secuencias de algún gen tanto en homo sapiens como en mus musculus y realiza el alineamiento local y global para ver el grado de conservación del gen entre especies. Investiga qué valores podías obtener con [pwalign](https://bioconductor.org/packages/release/bioc/html/pwalign.html). Puedes apoyarte en el [UCSC Genome Browser](https://genome.ucsc.edu/index.html) para buscar genes compartidos entre ambas.
 ############################################################
+pacman::p_load(pwalign, biomaRt)
+# options(timeout = 300) Aumento el tiempo de espera en useMart
+
+# Obtén la secuencia del gen TP53 en humanos
+human_mart <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+human_seq <- getSequence(id = "ENSG00000141510", 
+                         type = "ensembl_gene_id", 
+                         seqType = "coding", 
+                         mart = human_mart)[1, "coding"]
+
+# # Obtén la secuencia del gen TP53 en ratones
+mouse_mart <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+mouse_seq <- getSequence(id = "ENSMUSG00000059552", 
+                         type = "ensembl_gene_id", 
+                         seqType = "coding", 
+                         mart = mouse_mart)[2, "coding"]
+# Alineamiento global
+global_align <- pairwiseAlignment(
+  pattern = human_seq,
+  subject = mouse_seq,
+  type = "global",
+  substitutionMatrix = nucleotideSubstitutionMatrix(match = 1, mismatch = -1),
+  gapOpening = 5,
+  gapExtension = 2
+)
+
+# Alineamiento local
+local_align <- pairwiseAlignment(
+  pattern = human_seq,
+  subject = mouse_seq,
+  type = "local",
+  substitutionMatrix = nucleotideSubstitutionMatrix(match = 1, mismatch = -1),
+  gapOpening = 5,
+  gapExtension = 2
+)
+
+# Resultados
+resultados <- data.frame(
+  Tipo = c("Global (Needleman-Wunsch)", "Local (Smith-Waterman)"),
+  Score = c(score(global_align), score(local_align)),
+  Identidad_pct = c(round(pid(global_align), 2), round(pid(local_align), 2)),
+  Matches = c(nmatch(global_align), nmatch(local_align)),
+  Mismatches = c(nmismatch(global_align), nmismatch(local_align)),
+  stringsAsFactors = FALSE
+)
+
+detach("package:pwalign", unload = TRUE)
+detach("package:biomaRt", unload = TRUE)
